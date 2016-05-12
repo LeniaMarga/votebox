@@ -94,7 +94,7 @@ def service_leds():
 
             # Service error state 
             if not state_ok:
-                p.ChangeDutyCycle(led_on * 100 if j==0 else 0)
+                p.ChangeDutyCycle(led_on * max_bright if j==0 else 0)
                 continue
 
             # flash LED if pressed
