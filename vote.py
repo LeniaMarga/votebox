@@ -8,8 +8,8 @@ from itertools import chain
 log = logging.getLogger(__name__)   
 
 # Globals
-buttons = (6,4,18,22,25)
-leds = (12,17,27,23,5)
+buttons = (6,25,22,18,4)
+leds = (12,5,23,27,17)
 pressed = [0 for l in leds]
 pwm = []
 
@@ -20,18 +20,48 @@ max_bright = 90     # %   maximum duty rate percent
 flash_time = 3000   # ms  LED flashing time
 flash_each = 250    # ms  LED flash length (individual)
 
-VOTE_URL = 'https://openlab.ncl.ac.uk/votebox/vote'
+SERVICE_URL = 'https://openlab.ncl.ac.uk/votebox/'
 
+state_ok = False
 
 # Threaded worker for sending presses to server
 def send_vote(index):
-   payload = {'button': index, 'uuid': snowflake.snowflake()}
-   headers = {'content-type': 'application/json'}
+    payload = {'button': index, 'uuid': snowflake.snowflake()}
+    headers = {'content-type': 'application/json'}
    
-   log.debug(json.dumps(payload))
-   response = requests.post(VOTE_URL, data=json.dumps(payload), headers=headers)
-   if response.status_code != 200:
-       log.error("(Status: {0}) {1}".format(response.status_code, response.text[:100].replace('\n',' ')))
+    log.debug(json.dumps(payload))
+    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers)
+    if response.status_code != 200:
+        error_state("(Status: {0}) {1}".format(response.status_code, response.text[:100].replace('\n',' ')))
+    else:
+        error_state(clear=True)
+
+
+def test_connection():
+    try:
+        response = requests.get(SERVICE_URL + 'ping', timeout=10)
+    except Exception as e:
+        if not connection_error: # Only log these messages once
+            error_state("Could not ping SERVICE_URL {0}. Exception: {1}".format(SERVICE_URL, e))
+        test_connection.error = True
+    else:
+        if response.status_code == 200:
+            error_state(clear=True)
+            log.info("Connection tested and working")
+            test_connection.error = False
+        elif not test_connection.error: # Only log these messages once
+            error_state("Connection opened but bad response ({}) from server!".format(response.status_code))
+            test_connection.error = True
+#static
+test_connection.error = False
+
+
+def error_state(msg=None, clear=False):
+    global state_ok
+
+    state_ok = False or clear
+    if not state_ok:
+        log.error("Entered error state" if not msg else msg)
 
 
 def millis():
@@ -42,7 +72,7 @@ def buttonPress(channel):
     ix = buttons.index(channel)
     pressed[ix] = millis()
 
-    log.info("Pressed: {}".format(ix))
+    log.info("Pressed: {}, GPIO {}".format(ix, channel))
 
     # Send to server
     thread = threading.Thread(target=send_vote, args=(ix,))
@@ -53,18 +83,25 @@ def exit():
     GPIO.cleanup()
 
 
-def run_leds():
+def service_leds():
     # brightness 0 to 101 (and back)
     for i in chain(range(0,max_bright), range(max_bright,0,-1)):
 
         now = millis() # Do this once per inner loop (CPU usage)
+        led_on = (now // flash_each) %2 
+
         for j,p in enumerate(pwm):
+
+            # Service error state 
+            if not state_ok:
+                p.ChangeDutyCycle(led_on * 100 if j==0 else 0)
+                continue
+
             # flash LED if pressed
-            if pressed[j]:
+            elif pressed[j]:
                 if pressed[j] < (now - flash_time):
                     pressed[j] = 0 # Stop flashing
                 else:
-                    led_on = (now // flash_each) %2 
                     p.ChangeDutyCycle(led_on * 100)
             else: 
                 p.ChangeDutyCycle(i)
@@ -87,7 +124,11 @@ def main():
 
     try:
         while True:
-            run_leds()
+            service_leds()
+
+            if not state_ok:
+                test_connection()
+
     except KeyboardInterrupt:
         pass
 
@@ -103,5 +144,6 @@ def setup_logging():
 if __name__ == "__main__":
     atexit.register(exit)
     setup_logging()
+    test_connection()
     main()
 
