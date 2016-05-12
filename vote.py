@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import RPi.GPIO as GPIO
-import atexit, time
+import atexit, time, threading, requests, logging, json
+import snowflake
 from itertools import chain
+
+# Set up logger                                                                                                                                                
+log = logging.getLogger(__name__)   
 
 # Globals
 buttons = (6,4,18,22,25)
@@ -13,8 +17,21 @@ pause_time = 0.04   # s   LED fade speed
 bouncetime = 400    # ms  Switch debounce time
 frame_rate = 100    # hz  duty cycle rate
 max_bright = 90     # %   maximum duty rate percent
-flash_time = 4000   # ms  LED flashing time
+flash_time = 3000   # ms  LED flashing time
 flash_each = 250    # ms  LED flash length (individual)
+
+VOTE_URL = 'https://openlab.ncl.ac.uk/votebox/vote'
+
+
+# Threaded worker for sending presses to server
+def send_vote(index):
+   payload = {'button': index, 'uuid': snowflake.snowflake()}
+   headers = {'content-type': 'application/json'}
+   
+   log.debug(json.dumps(payload))
+   response = requests.post(VOTE_URL, data=json.dumps(payload), headers=headers)
+   if response.status_code != 200:
+       log.error("(Status: {0}) {1}".format(response.status_code, response.text[:100].replace('\n',' ')))
 
 
 def millis():
@@ -23,7 +40,13 @@ def millis():
 
 def buttonPress(channel):
     ix = buttons.index(channel)
-    pressed[ix] = millis() 
+    pressed[ix] = millis()
+
+    log.info("Pressed: {}".format(ix))
+
+    # Send to server
+    thread = threading.Thread(target=send_vote, args=(ix,))
+    thread.start()
 
 
 def exit():
@@ -32,7 +55,7 @@ def exit():
 
 def run_leds():
     # brightness 0 to 101 (and back)
-    for i in chain(range(max_bright,0,-1),range(0,max_bright)):
+    for i in chain(range(0,max_bright), range(max_bright,0,-1)):
 
         now = millis() # Do this once per inner loop (CPU usage)
         for j,p in enumerate(pwm):
@@ -55,7 +78,7 @@ def main():
     for led in leds:
         GPIO.setup(led, GPIO.OUT)
         pwm.append(GPIO.PWM(led, frame_rate)) # @ 100Hz
-        pwm[-1].start(max_bright)
+        pwm[-1].start(0)
 
     for btn in buttons:
         GPIO.setup(btn, GPIO.IN) # Set the switch to be an input
@@ -68,9 +91,17 @@ def main():
     except KeyboardInterrupt:
         pass
 
-# Todo: threaded worker for sending presses to server
+
+def setup_logging():
+    strh = logging.StreamHandler()
+    strh.setLevel(logging.INFO)
+    strh.setFormatter(logging.Formatter('[%(asctime)s - %(levelname)s] %(message)s'))
+    log.addHandler(strh) 
+    log.setLevel(logging.INFO)
+
 
 if __name__ == "__main__":
     atexit.register(exit)
+    setup_logging()
     main()
 
