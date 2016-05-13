@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import RPi.GPIO as GPIO
-import atexit, time, threading, requests, logging, json
+import atexit, os, time, threading, requests, logging, json, base64
 import snowflake
+from itsdangerous import TimestampSigner
 from itertools import chain
 
 # Set up logger                                                                                                                                                
@@ -30,13 +31,23 @@ config = {}
 with open(CONFIG_FILE) as fil:
     config = json.load(fil)
 
+
+# Generate an auth token
+def get_auth_token():
+    # Generate a cryptographically secure random number for the token
+    tok = base64.b64encode(os.urandom(32)).decode('utf-8')
+    # Sign it with the API key, giving us an expiring token!
+    s = TimestampSigner(config['key'])
+    return s.sign(tok)
+
+
 # Threaded worker for sending presses to server
 def send_vote(index):
     payload = {'button': index, 'uuid': UUID}
     headers = {'content-type': 'application/json'}
    
     log.debug(json.dumps(payload))
-    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers, auth=(UUID, config['key']))
+    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers, auth=(UUID, get_auth_token()))
     if response.status_code != 200:
         error_state("(Status: {0}) {1}".format(response.status_code, response.text[:100].replace('\n',' ')))
     else:
@@ -45,7 +56,7 @@ def send_vote(index):
 
 def test_connection():
     try:
-        response = requests.get(SERVICE_URL + 'ping', timeout=10, auth=(UUID, config['key']))
+        response = requests.get(SERVICE_URL + 'ping', timeout=10, auth=(UUID, get_auth_token()))
     except Exception as e:
         if not connection_error: # Only log these messages once
             error_state("Could not ping SERVICE_URL {0}. Exception: {1}".format(SERVICE_URL, e))

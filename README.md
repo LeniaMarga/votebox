@@ -10,7 +10,7 @@ The client side has no information on what each button actually means. This is
 defined on the server side.
 
 ## Dependencies
-`pip install snowflake`
+`pip3 install snowflake itsdangerous`
 
 ## Server setup
 ```
