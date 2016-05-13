@@ -84,6 +84,8 @@ flask_options = {
 # Need CONFIG_JSON in ENV for this to work.
 # e.g. export CONFIG_JSON="$(cat db.json | sed 's/ //g' | tr '\n' ' ')"
 def connect_mongodb():
+    global db
+
     try:
         log.debug( "Using config: {}".format(CONFIG_JSON) )
         config = json.loads(CONFIG_JSON)
@@ -98,8 +100,6 @@ def connect_mongodb():
     except KeyError as e:
         log.critical("Could not connect to database. Did you put CONFIG_JSON in the environment?")
         raise
-
-    return db
 
 
 '''
@@ -201,6 +201,8 @@ def key():
 
 # Register blueprint to the app
 app.register_blueprint(votebox, url_prefix=APPLICATION_ROOT)
+# Connect database before requests start
+app.before_first_request(connect_mongodb)
 
 '''
     Main. Does not run when running with WSGI
@@ -211,8 +213,6 @@ if __name__ == "__main__":
     strh.setFormatter(logging.Formatter('[%(asctime)s - %(levelname)s] %(message)s'))
     log.addHandler(strh)
     log.setLevel(logging.DEBUG) 
-    
-    db = connect_mongodb()
 
     #log.debug(app.url_map)
     app.run(**flask_options)
