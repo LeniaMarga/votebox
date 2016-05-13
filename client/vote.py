@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import RPi.GPIO as GPIO
-import atexit, os, time, threading, requests, logging, json, base64
+import atexit, os, time, threading, requests, logging, json, itsdangerous, base64
 import snowflake
-from itsdangerous import TimestampSigner
 from itertools import chain
 
 # Set up logger                                                                                                                                                
@@ -34,11 +33,11 @@ with open(CONFIG_FILE) as fil:
 
 # Generate an auth token
 def get_auth_token():
-    # Generate a cryptographically secure random number for the token
-    tok = base64.b64encode(os.urandom(32)).decode('utf-8')
-    # Sign it with the API key, giving us an expiring token!
-    s = TimestampSigner(config['key'])
-    return s.sign(tok)
+    # Generate a cryptographically random number for the token
+    tok = base64.b64encode(os.urandom(32))
+    # Sign it with the API key, giving us a token!
+    s = itsdangerous.Signer(config['key'])
+    return s.sign(tok).decode('utf-8')
 
 
 # Threaded worker for sending presses to server
