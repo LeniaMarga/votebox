@@ -43,8 +43,4 @@ COPY conf/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY . /app
 WORKDIR /app
 
-# Set environment variables
-ENV BAX_TOOLS_DIR /app/bin
-ENV REDIS_HOSTNAME redis
-
 CMD ["/usr/bin/supervisord"]
