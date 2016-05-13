@@ -22,16 +22,21 @@ flash_time = 3000   # ms  LED flashing time
 flash_each = 250    # ms  LED flash length (individual)
 
 SERVICE_URL = 'https://openlab.ncl.ac.uk/votebox/'
-
+CONFIG_FILE = 'auth.json'
+UUID = snowflake.snowflake()
 state_ok = False
+
+config = {}
+with open(CONFIG_FILE) as fil:
+    config = json.load(fil)
 
 # Threaded worker for sending presses to server
 def send_vote(index):
-    payload = {'button': index, 'uuid': snowflake.snowflake()}
+    payload = {'button': index, 'uuid': UUID}
     headers = {'content-type': 'application/json'}
    
     log.debug(json.dumps(payload))
-    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers)
+    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers, auth=(UUID, config['key']))
     if response.status_code != 200:
         error_state("(Status: {0}) {1}".format(response.status_code, response.text[:100].replace('\n',' ')))
     else:
@@ -40,7 +45,7 @@ def send_vote(index):
 
 def test_connection():
     try:
-        response = requests.get(SERVICE_URL + 'ping', timeout=10)
+        response = requests.get(SERVICE_URL + 'ping', timeout=10, auth=(UUID, config['key']))
     except Exception as e:
         if not connection_error: # Only log these messages once
             error_state("Could not ping SERVICE_URL {0}. Exception: {1}".format(SERVICE_URL, e))
