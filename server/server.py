@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import logging, os, json, pymongo, time, markdown, base64
-from itsdangerous import Signer
 from pymongo import MongoClient
-from flask import Flask, Response, Blueprint, Markup, escape, request, redirect, url_for
+from functools import wraps
+from flask import Flask, Response, Blueprint, Markup, escape, request, redirect, url_for, abort
 from bson.json_util import dumps
 
 HELPSTRING="""
@@ -23,13 +23,15 @@ _Parameters:_ ix (integer, index), limit (integer, limit records returned)
 Make a database query and return stored records
 
 ### /ping
-_Methods:_ `GET`   
+_Methods:_ `GET`  
+_Requires authorization_
 
 Used internally by the votepi client to check if the API is there. Returns "OK"
 on success. 
 
 ### /vote
 _Methods:_ `POST`   
+_Requires authorization_
 
 Post a "vote" to the database to store. Votes must be contained in the POST body
 and be of the form:   
@@ -42,9 +44,11 @@ _Methods:_ `GET`
 _Parameters:_ uuid 
 
 Generate an API key and API secret. These must be activated in the database
-by an admin before they can be used to authenticate a client. The provided uuid
-is signed using our private key to create the API key. The API secret is a 
-128-bit random value.
+by an admin before they can be used to authenticate a client. 
+
+# Authorization
+Authorization is accomplished by setting the HTTP basic auth headers with the
+username being the uuid and the password beign a generated (and active) API key.
 
 """
 
@@ -61,7 +65,6 @@ votebox = Blueprint('votebox', __name__, template_folder='templates')
 
 # Configuration
 CONFIG_JSON = os.environ.get('CONFIG_JSON', '{}')
-SECRET_KEY = os.environ.get('SECRET_KEY')
 
 DEBUG = True
 app.config.from_object(__name__)
@@ -98,6 +101,29 @@ def connect_mongodb():
 
 
 '''
+    API key validating wrapper
+    https://coderwall.com/p/4qickw/require-an-api-key-for-a-route-in-flask-using-only-a-decorator
+'''
+# The actual decorator function
+def require_api_key(view_function):
+
+    @wraps(view_function)
+    # the new, post-decoration function. Note *args and **kwargs here.
+    def decorated_function(*args, **kwargs):
+        auth=request.authorization
+
+        if auth:
+            verify=db.devices.find_one(auth['username'])
+            if verify['active'] and verify['key'] == auth['password']:
+                return view_function(*args, **kwargs)
+
+        # Auth failed if not all conditions met 
+        abort(401)
+
+    return decorated_function
+
+
+'''
     Application Routes
 '''
 @votebox.route('/', methods=['GET'])
@@ -118,11 +144,13 @@ def query():
 
 
 @votebox.route('ping', methods=['GET'])
+@require_api_key
 def ping():
     return "OK", 200
 
 
 @votebox.route('vote', methods=['POST'])
+@require_api_key
 def vote():
     v = request.get_json()
     v['timestamp'] = int(time.time())
@@ -144,25 +172,19 @@ def key():
     if not uuid:
         return Response(json.dumps( {'response':'bad uuid'} ), mimetype='application/json'), 400
 
-    s = Signer(SECRET_KEY)
-    key = s.sign(uuid.encode('utf-8'))
-
     # Generate a cryptographically secure random number for the secret
-    secret = base64.b64encode(os.urandom(32)).decode('utf-8') 
-    
+    key = base64.b64encode(os.urandom(32)).decode('utf-8') 
     auth = {
         '_id':   uuid,
-        'key':    key.decode('utf-8').split('.')[1], 
-        'secret': secret,
+        'key':    key,
         'active': False
     }
     try:
-        db.devices.insert_one(auth.copy())
+        db.devices.insert_one(auth)
     except pymongo.errors.DuplicateKeyError as e:
-        return "{}. \nLooks like a secret was already generated for this uuid".format(str(e))
+        return "{}. \nLooks like a key was already generated for this uuid".format(str(e))
 
-    return Response( dumps( auth ))
-
+    return Response( dumps(auth) )
 
 
 # Register blueprint to the app
