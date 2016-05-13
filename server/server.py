@@ -30,7 +30,7 @@ def ping():
     return "OK", 200
 
 
-@votebox.route('vote', methods=['GET'])
+@votebox.route('vote', methods=['POST'])
 def vote():
     return Response(json.dumps( {'response':'OK'} ), mimetype='application/json')
 
