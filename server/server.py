@@ -118,10 +118,10 @@ def require_api_key(view_function):
             verify=db.devices.find_one(auth['username'])
             log.debug(verify['key'])
             log.debug(auth)
-            s = itsdangerous.Signer(verify['key'])
+            s = itsdangerous.TimestampSigner(verify['key'])
 
             try:
-                if verify['active'] and s.unsign(auth['password']):
+                if verify['active'] and s.unsign(auth['password'], max_age=10):
                     return view_function(*args, **kwargs)
             except itsdangerous.SignatureExpired as e:
                 log.warning( "Expired signature from client {}".format(auth['username']) )
