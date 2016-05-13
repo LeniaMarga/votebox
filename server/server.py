@@ -116,7 +116,6 @@ def require_api_key(view_function):
 
         if auth:
             verify=db.devices.find_one(auth['username'])
-            log.debug(verify['key'])
             log.debug(auth)
             s = itsdangerous.TimestampSigner(verify['key'])
 
@@ -128,8 +127,10 @@ def require_api_key(view_function):
             except itsdangerous.BadTimeSignature as e:
                 log.warning( str(e) )
 
-        # Auth failed if not all conditions met 
-        log.info("Auth failed: uuid: {}, token: {}".format(auth['username'], auth['password']))
+            # Auth failed if not all conditions met 
+            log.warning("Auth failed: uuid: {}, token: {}".format(auth['username'], auth['password']))
+        else:
+            log.warning("Auth failed: no HTTP Basic Auth headers")
         abort(401)
 
     return decorated_function
