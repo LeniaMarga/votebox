@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import logging, os, json, pymongo, time, markdown
+import logging, os, json, pymongo, time, markdown, base64
+from itsdangerous import Signer
 from pymongo import MongoClient
 from flask import Flask, Response, Blueprint, Markup, escape, request, redirect, url_for
 from bson.json_util import dumps
@@ -36,6 +37,15 @@ and be of the form:
     {'button': 2, 'uuid': '16129e6d-4b62-48d0-8c01-224b905d55bd', 'timestamp': 1463164336}
 ```
 
+### /key
+_Methods:_ `GET`   
+_Parameters:_ uuid 
+
+Generate an API key and API secret. These must be activated in the database
+by an admin before they can be used to authenticate a client. The provided uuid
+is signed using our private key to create the API key. The API secret is a 
+128-bit random value.
+
 """
 
 # Set up logger
@@ -48,6 +58,10 @@ app = Flask(__name__)
 APPLICATION_ROOT = os.environ.get('PROXY_PATH', '/').strip() or '/'
 votebox = Blueprint('votebox', __name__, template_folder='templates')
 # Look at end of file for where this blueprint is actually registered to the app
+
+# Configuration
+CONFIG_JSON = os.environ.get('CONFIG_JSON', '{}')
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 DEBUG = True
 app.config.from_object(__name__)
@@ -66,7 +80,6 @@ flask_options = {
 # e.g. export CONFIG_JSON="$(cat db.json | sed 's/ //g' | tr '\n' ' ')"
 def connect_mongodb():
     try:
-        CONFIG_JSON = os.environ.get('CONFIG_JSON', '{}')
         log.debug( "Using config: {}".format(CONFIG_JSON) )
         config = json.loads(CONFIG_JSON)
 
@@ -95,12 +108,12 @@ def index():
 
 @votebox.route('query', methods=['GET'])
 def query():
-    ix = int(request.args.get('ix'))
-    limit = int(request.args.get('limit') or 50)
+    ix = request.args.get('ix')
+    limit = request.args.get('limit') or 50
     if ix is None:
         return redirect( url_for('.query', **{'ix':0, **request.args}) ) 
     
-    votes = db.votes.find().skip(ix).limit(limit).sort("_id",pymongo.DESCENDING)
+    votes = db.votes.find().skip(int(ix)).limit(int(limit)).sort("_id",pymongo.DESCENDING)
     return Response(dumps( votes ), mimetype='application/json'), 200
 
 
@@ -122,6 +135,33 @@ def vote():
     log.info(v)
     db.votes.insert_one(v)
     return Response(json.dumps( {'response':'ok'} ), mimetype='application/json')
+
+
+@votebox.route('key', methods=['GET'])
+def key():
+    # Sign the uuid to create the API key
+    uuid = request.args.get('uuid')
+    if not uuid:
+        return Response(json.dumps( {'response':'bad uuid'} ), mimetype='application/json'), 400
+
+    s = Signer(SECRET_KEY)
+    key = s.sign(uuid.encode('utf-8'))
+
+    # Generate a cryptographically secure random number for the secret
+    secret = base64.b64encode(os.urandom(32)).decode('utf-8') 
+    
+    auth = {
+        '_id':   uuid,
+        'key':    key.decode('utf-8').split('.')[1], 
+        'secret': secret,
+        'active': False
+    }
+    try:
+        db.devices.insert_one(auth.copy())
+    except pymongo.errors.DuplicateKeyError as e:
+        return "{}. \nLooks like a secret was already generated for this uuid".format(str(e))
+
+    return Response( dumps( auth ))
 
 
 
