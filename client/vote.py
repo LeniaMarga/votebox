@@ -13,10 +13,11 @@ leds = (12,5,23,27,17)
 pressed = [0 for l in leds]
 pwm = []
 
-pause_time = 0.04   # s   LED fade speed 
+pause_time = 0.08   # s   LED fade speed 
 bouncetime = 400    # ms  Switch debounce time
 frame_rate = 100    # hz  duty cycle rate
-max_bright = 90     # %   maximum duty rate percent
+max_bright = 50     # %   maximum duty rate percent
+min_bright = 5      # %   minimum  "
 flash_time = 3000   # ms  LED flashing time
 flash_each = 250    # ms  LED flash length (individual)
 
@@ -85,7 +86,7 @@ def exit():
 
 def service_leds():
     # brightness 0 to 101 (and back)
-    for i in chain(range(0,max_bright), range(max_bright,0,-1)):
+    for i in chain(range(min_bright,max_bright), range(max_bright,min_bright,-1)):
 
         now = millis() # Do this once per inner loop (CPU usage)
         led_on = (now // flash_each) %2 
