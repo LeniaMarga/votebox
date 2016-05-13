@@ -1,7 +1,42 @@
 #!/usr/bin/env python3
-import logging, os, json, pymongo
+import logging, os, json, pymongo, time, markdown
 from pymongo import MongoClient
-from flask import Flask, Response, Blueprint, escape
+from flask import Flask, Response, Blueprint, Markup, escape, request, redirect, url_for
+from bson.json_util import dumps
+
+HELPSTRING="""
+
+# Votebox API Routes
+All API routes (except `/`) must be accompanied by an API key and API secret
+set in the header.
+
+### /
+_Methods:_ `GET`   
+
+Return a help string
+
+### /query
+_Methods:_ `GET`   
+_Parameters:_ ix (integer, index), limit (integer, limit records returned)
+
+Make a database query and return stored records
+
+### /ping
+_Methods:_ `GET`   
+
+Used internally by the votepi client to check if the API is there. Returns "OK"
+on success. 
+
+### /vote
+_Methods:_ `POST`   
+
+Post a "vote" to the database to store. Votes must be contained in the POST body
+and be of the form:   
+```
+    {'button': 2, 'uuid': '16129e6d-4b62-48d0-8c01-224b905d55bd', 'timestamp': 1463164336}
+```
+
+"""
 
 # Set up logger
 log = logging.getLogger(__name__)
@@ -16,6 +51,12 @@ votebox = Blueprint('votebox', __name__, template_folder='templates')
 
 DEBUG = True
 app.config.from_object(__name__)
+
+flask_options = {
+    'host':'0.0.0.0',
+    'threaded':True
+}
+
 
 '''
     Auxilliary functions
@@ -42,12 +83,25 @@ def connect_mongodb():
 
     return db
 
+
 '''
     Application Routes
 '''
 @votebox.route('/', methods=['GET'])
 def index():
-    return "OK", 200
+    return Markup("<!DOCTYPE html>\n<title>VoteBox API</title>\n") \
+            + Markup(markdown.markdown(HELPSTRING)) , 200
+
+
+@votebox.route('query', methods=['GET'])
+def query():
+    ix = int(request.args.get('ix'))
+    limit = int(request.args.get('limit') or 50)
+    if ix is None:
+        return redirect( url_for('.query', **{'ix':0, **request.args}) ) 
+    
+    votes = db.votes.find().skip(ix).limit(limit).sort("_id",pymongo.DESCENDING)
+    return Response(dumps( votes ), mimetype='application/json'), 200
 
 
 @votebox.route('ping', methods=['GET'])
@@ -57,8 +111,17 @@ def ping():
 
 @votebox.route('vote', methods=['POST'])
 def vote():
-    log.debug(escape(request.form['vote']))
-    return Response(json.dumps( {'response':'OK'} ), mimetype='application/json')
+    v = request.get_json()
+    v['timestamp'] = int(time.time())
+    
+    # Sanity check record before insert
+    if 'uuid' not in v or 'button' not in v:
+        return Response(json.dumps( {'response':'invalid'} ), mimetype='application/json'), 400
+
+    # Insert into database
+    log.info(v)
+    db.votes.insert_one(v)
+    return Response(json.dumps( {'response':'ok'} ), mimetype='application/json')
 
 
 
@@ -78,4 +141,5 @@ if __name__ == "__main__":
     db = connect_mongodb()
 
     #log.debug(app.url_map)
-    app.run()
+    app.run(**flask_options)
+
