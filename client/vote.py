@@ -36,7 +36,7 @@ def get_auth_token():
     # Generate a cryptographically random number for the token
     tok = base64.b64encode(os.urandom(32))
     # Sign it with the API key, giving us a token!
-    s = itsdangerous.Signer(config['key'])
+    s = itsdangerous.TimestampSigner(config['key'])
     return s.sign(tok).decode('utf-8')
 
 
