@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import logging, os, json, pymongo, time, markdown, base64
+import logging, os, json, pymongo, time, markdown, base64, itsdangerous
 from pymongo import MongoClient
 from functools import wraps
 from flask import Flask, Response, Blueprint, Markup, escape, request, redirect, url_for, abort
@@ -47,8 +47,10 @@ Generate an API key and API secret. These must be activated in the database
 by an admin before they can be used to authenticate a client. 
 
 # Authorization
-Authorization is accomplished by setting the HTTP basic auth headers with the
-username being the uuid and the password beign a generated (and active) API key.
+Authorization is accomplished by setting the HTTP basic auth headers, with the
+username being the uuid and the password being an authorization token generated
+by signing some random nonce with the device's API key. This ensures that the
+API key is never sent over the network, but the token can verify the identity.
 
 """
 
@@ -114,10 +116,20 @@ def require_api_key(view_function):
 
         if auth:
             verify=db.devices.find_one(auth['username'])
-            if verify['active'] and verify['key'] == auth['password']:
-                return view_function(*args, **kwargs)
+            log.debug(verify['key'])
+            log.debug(auth)
+            s = itsdangerous.Signer(verify['key'])
+
+            try:
+                if verify['active'] and s.unsign(auth['password']):
+                    return view_function(*args, **kwargs)
+            except itsdangerous.SignatureExpired as e:
+                log.warning( "Expired signature from client {}".format(auth['username']) )
+            except itsdangerous.BadTimeSignature as e:
+                log.warning( str(e) )
 
         # Auth failed if not all conditions met 
+        log.info("Auth failed: uuid: {}, token: {}".format(auth['username'], auth['password']))
         abort(401)
 
     return decorated_function
