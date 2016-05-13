@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import logging, os, json
-from flask import Flask, Response, Blueprint
+import logging, os, json, pymongo
+from pymongo import MongoClient
+from flask import Flask, Response, Blueprint, escape
 
 # Set up logger
 log = logging.getLogger(__name__)
@@ -16,6 +17,30 @@ votebox = Blueprint('votebox', __name__, template_folder='templates')
 DEBUG = True
 app.config.from_object(__name__)
 
+'''
+    Auxilliary functions
+'''
+# Connect to the mongodb database
+# Need CONFIG_JSON in ENV for this to work.
+# e.g. export CONFIG_JSON="$(cat db.json | sed 's/ //g' | tr '\n' ' ')"
+def connect_mongodb():
+    try:
+        CONFIG_JSON = os.environ.get('CONFIG_JSON', '{}')
+        log.debug( "Using config: {}".format(CONFIG_JSON) )
+        config = json.loads(CONFIG_JSON)
+
+        client = MongoClient(config['host'], config['port'])
+        db = client[config['db']]
+
+        db.authenticate(config['user'], password=config['pwd'])
+
+        log.debug( "Total votes: {}".format(db.votes.count()) )
+
+    except KeyError as e:
+        log.critical("Could not connect to database. Did you put CONFIG_JSON in the environment?")
+        raise
+
+    return db
 
 '''
     Application Routes
@@ -32,6 +57,7 @@ def ping():
 
 @votebox.route('vote', methods=['POST'])
 def vote():
+    log.debug(escape(request.form['vote']))
     return Response(json.dumps( {'response':'OK'} ), mimetype='application/json')
 
 
@@ -45,9 +71,11 @@ app.register_blueprint(votebox, url_prefix=APPLICATION_ROOT)
 if __name__ == "__main__":
     strh = logging.StreamHandler() 
     strh.setLevel(logging.DEBUG)
+    strh.setFormatter(logging.Formatter('[%(asctime)s - %(levelname)s] %(message)s'))
     log.addHandler(strh)
     log.setLevel(logging.DEBUG) 
+    
+    db = connect_mongodb()
 
-    log.debug(app.url_map)
+    #log.debug(app.url_map)
     app.run()
-
