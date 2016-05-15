@@ -183,21 +183,33 @@ def key():
     # Sign the uuid to create the API key
     uuid = request.args.get('uuid')
     if not uuid:
-        return Response(json.dumps( {'response':'bad uuid'} ), mimetype='application/json'), 400
+        return Response( json.dumps({
+            'error':'bad uuid'
+            }), mimetype='application/json'
+        ), 400
 
     # Generate a cryptographically secure random number for the secret
     key = base64.b64encode(os.urandom(32)).decode('utf-8') 
     auth = {
-        '_id':   uuid,
+        '_id':    uuid, # Used as mongo primary key
         'key':    key,
-        'active': False
+        'active': True,
+        'created':int(time.time())
     }
+
     try:
         db.devices.insert_one(auth)
     except pymongo.errors.DuplicateKeyError as e:
-        return "{}. \nLooks like a key was already generated for this uuid".format(str(e))
+        return Response( json.dumps({
+                'error'    : "{}".format(str(e)),
+                'response' : "key already generated for this uuid"
+            }), mimetype='application/json'
+        ), 403
 
-    return Response( dumps(auth) )
+    return Response(
+        dumps(auth),
+        mimetype='application/json'
+    ), 200
 
 
 # Register blueprint to the app

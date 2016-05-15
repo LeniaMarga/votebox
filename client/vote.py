@@ -23,12 +23,37 @@ flash_each = 250    # ms  LED flash length (individual)
 
 SERVICE_URL = 'https://openlab.ncl.ac.uk/votebox/'
 CONFIG_FILE = 'auth.json'
-UUID = snowflake.snowflake()
 state_ok = False
 
 config = {}
-with open(CONFIG_FILE) as fil:
-    config = json.load(fil)
+
+# Read in configuration file
+def read_config():
+    with open(CONFIG_FILE) as fil:
+        c = json.load(fil)
+    return c
+
+
+# Write configuration back to file (e.g. key added)
+def write_config(c):
+    with open(CONFIG_FILE, 'wb') as fil:
+        json.dump(c, fil)
+
+
+# Is our config correct? Do we have a uuid and matching API key?
+def check_config(c):
+    if 'uuid' not in c:
+        c['uuid'] = snowflake.snowflake()
+        write_config(c)
+
+    if 'key' not in c:
+        response = requests.get( SERVICE_URL + 'key', params={'uuid':c['uuid']})
+        if response.status_code == 200:
+            response = json.dumps(response.text)
+            c['key'] = response['key']
+            write_config(c)
+
+    return c
 
 
 # Generate an auth token
@@ -42,20 +67,21 @@ def get_auth_token():
 
 # Threaded worker for sending presses to server
 def send_vote(index):
-    payload = {'button': index, 'uuid': UUID}
+    payload = {'button': index, 'uuid': config['uuid']}
     headers = {'content-type': 'application/json'}
    
     log.debug(json.dumps(payload))
-    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers, auth=(UUID, get_auth_token()))
+    response = requests.post(SERVICE_URL + 'vote', data=json.dumps(payload), headers=headers, auth=(config['uuid'], get_auth_token()))
     if response.status_code != 200:
         error_state("(Status: {0}) {1}".format(response.status_code, response.text[:100].replace('\n',' ')))
     else:
         error_state(clear=True)
 
 
+# Check connection, and API key valid
 def test_connection():
     try:
-        response = requests.get(SERVICE_URL + 'ping', timeout=10, auth=(UUID, get_auth_token()))
+        response = requests.get(SERVICE_URL + 'ping', timeout=10, auth=(config['uuid'], get_auth_token()))
     except Exception as e:
         if not connection_error: # Only log these messages once
             error_state("Could not ping SERVICE_URL {0}. Exception: {1}".format(SERVICE_URL, e))
@@ -160,6 +186,8 @@ def setup_logging():
 if __name__ == "__main__":
     atexit.register(exit)
     setup_logging()
+    config = read_config()
+    config = check_config()
     test_connection()
     main()
 
