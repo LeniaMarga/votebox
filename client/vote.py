@@ -29,14 +29,17 @@ config = {}
 
 # Read in configuration file
 def read_config():
-    with open(CONFIG_FILE) as fil:
-        c = json.load(fil)
-    return c
-
+    try:
+        with open(CONFIG_FILE) as fil:
+            c = json.load(fil)
+        return c
+    except (FileNotFoundError, ValueError) as e:
+        log.error("No config found")
+        return {}
 
 # Write configuration back to file (e.g. key added)
 def write_config(c):
-    with open(CONFIG_FILE, 'wb') as fil:
+    with open(CONFIG_FILE, 'w') as fil:
         json.dump(c, fil)
 
 
@@ -44,15 +47,26 @@ def write_config(c):
 def check_config(c):
     if 'uuid' not in c:
         c['uuid'] = snowflake.snowflake()
+        log.info("My UUID is {}".format(c['uuid']))
         write_config(c)
 
     if 'key' not in c:
+        log.info("Requesting API key from service at {}".format(SERVICE_URL))   
         response = requests.get( SERVICE_URL + 'key', params={'uuid':c['uuid']})
+
         if response.status_code == 200:
-            response = json.dumps(response.text)
+            log.info("Got API key, storing it in {}".format(CONFIG_FILE))
+            response = json.loads(response.text)
             c['key'] = response['key']
             write_config(c)
+        else:
+            log.critical((
+                    "Could not request API key (status {}) "+
+                    "and it is not in the config file."
+                ).format(response.status_code))
+            error_state("Failed to get an API key. Cannot continue, but will keep flashing fail LED.")
 
+    log.info("My configuration is: {}".format(json.dumps(c)))
     return c
 
 
@@ -80,10 +94,13 @@ def send_vote(index):
 
 # Check connection, and API key valid
 def test_connection():
+    if 'key' not in config:
+        test_connection.error = True
+        return # Will already be in error state from check_config 
     try:
         response = requests.get(SERVICE_URL + 'ping', timeout=10, auth=(config['uuid'], get_auth_token()))
     except Exception as e:
-        if not connection_error: # Only log these messages once
+        if not test_connection.error: # Only log these messages once
             error_state("Could not ping SERVICE_URL {0}. Exception: {1}".format(SERVICE_URL, e))
         test_connection.error = True
     else:
@@ -181,13 +198,14 @@ def setup_logging():
     strh.setFormatter(logging.Formatter('[%(asctime)s - %(levelname)s] %(message)s'))
     log.addHandler(strh) 
     log.setLevel(logging.INFO)
-
+    
+    log.info("Starting VoteBox on {}".format(time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime())))
 
 if __name__ == "__main__":
-    atexit.register(exit)
     setup_logging()
     config = read_config()
-    config = check_config()
+    config = check_config(config)
     test_connection()
+    atexit.register(exit)
     main()
 
