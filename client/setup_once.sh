@@ -20,3 +20,9 @@ rm ~/votebox/auth.json
 
 # Update tunnel port
 sudo sed -i "s|\(\/opt\/tunnel\/tunnel.sh\) \(22\) \([0-9\ ]*\) \(.*\)|\1 \2 $PORT \4|" /etc/rc.local
+
+# Regenerate SSH host keys
+sudo rm -rf /etc/ssh/ssh_host_*
+sudo dpkg-reconfigure openssh-server
+
+echo "Done!"
